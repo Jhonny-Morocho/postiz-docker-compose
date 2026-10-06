@@ -1,0 +1,20 @@
+{
+  "type": "now",
+  "date": "2026-10-06T23:00:00.000Z",
+  "shortLink": false,
+  "tags": [],
+  "posts": [
+    {
+      "integration": { "id": "cmux7ue880001nz8dp1z3y4da" },
+      "value": [
+        {
+          "content": "Prueba de video desde Dropbox",
+          "image": [
+            { "id": "video1", "path": "https://www.dropbox.com/scl/fi/4h9tw0hz7ehxjlbw28u4n/01-ralph-ar-x-la-chicho-x-tarjetazo-x-jojanx-x-tarjet.mp4?rlkey=6brm07o8o9znoppk3b8rj8173&raw=1" }
+          ]
+        }
+      ],
+      "settings": { "__type": "facebook" }
+    }
+  ]
+}
