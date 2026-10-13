@@ -86,7 +86,7 @@ services:
       OPENAI_API_KEY: ""
       NEXT_PUBLIC_DISCORD_SUPPORT: ""
       NEXT_PUBLIC_POLOTNO: ""
-      API_LIMIT: 120
+      API_LIMIT: 500
 
       # === Payment / Stripe Settings
       FEE_AMOUNT: 0.05
