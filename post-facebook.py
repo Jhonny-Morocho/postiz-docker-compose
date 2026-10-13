@@ -1,11 +1,14 @@
 """Modulo para publicar y programar videos en Facebook, Instagram y TikTok a traves de Postiz.
 
-Publica los videos definidos en un archivo CSV alojados en Dropbox hacia:
-- Facebook: Publicacion de video y Story
-- Instagram: Reel (Publicacion de video) y Story
-- TikTok: Publicacion de video
+Procesa multiples carpetas de Dropbox, identificando dinamicamente:
+- El DJ / Proveedor correspondiente a cada video
+- El Genero musical de cada tema
+- Los metadatos de BPM y version (Edit / Remix)
 
-El primer video se publica de inmediato y los siguientes se programan cada 30 minutos.
+Programa las publicaciones cada 30 minutos a traves de las 3 redes sociales:
+- Facebook: Post de video y Story
+- Instagram: Reel y Story
+- TikTok: Post de video directo
 """
 
 import csv
@@ -22,18 +25,16 @@ from pathlib import Path
 INTERVALO_MINUTOS = 30
 POSTIZ_URL_BASE = os.environ.get("POSTIZ_URL", "http://localhost:4007/api/public/v1")
 CANAL_FACEBOOK_DEFECTO = "cmux7ue880001nz8dp1z3y4da"
-CARPETA_VIDEOS = Path(
-    os.environ.get(
-        "CARPETA",
-        r"C:\Users\Usuario iTC\Dropbox\VIDEOS-PUBLICIDAD-PROEDITS\dj-deyzer-nuevos-con-audio",
-    )
-)
-RUTA_DROPBOX_BASE = os.environ.get(
-    "DROPBOX_PATH",
-    "/VIDEOS-PUBLICIDAD-PROEDITS/dj-deyzer-nuevos-con-audio",
-)
 ARCHIVO_HISTORIAL = Path(__file__).with_name("publicados.json")
 MODO_SIMULACION = "--dry" in sys.argv
+
+CARPETAS_DROPBOX_PREDETERMINADAS = [
+    r"C:\Users\Usuario iTC\Dropbox\VIDEOS-PUBLICIDAD-PROEDITS\dj-jordan-medina-productos-halloween-con-audio",
+    r"C:\Users\Usuario iTC\Dropbox\VIDEOS-PUBLICIDAD-PROEDITS\dj-jordan-medina-productos-halloween-verano-bruja-con-audio",
+    r"C:\Users\Usuario iTC\Dropbox\VIDEOS-PUBLICIDAD-PROEDITS\dj-nikel-the-skpt-productos-halloween-con-audio",
+    r"C:\Users\Usuario iTC\Dropbox\VIDEOS-PUBLICIDAD-PROEDITS\top20-reggaeton-halloween-2026-10-05",
+    r"C:\Users\Usuario iTC\Dropbox\VIDEOS-PUBLICIDAD-PROEDITS\dj-deyzer-nuevos-con-audio",
+]
 
 DESTINOS_PUBLICACION = [
     ("fb_post", "facebook", "post", True),
@@ -54,7 +55,7 @@ TOKEN_DROPBOX_POR_DEFECTO = (
 def realizar_peticion_http(
     url, cuerpo, token_autorizacion, permitir_409=False, metodo="POST", max_reintentos=5
 ):
-    """Ejecuta una solicitud HTTP JSON con reintentos automaticos ante limite de tasa (429)."""
+    """Ejecuta una solicitud HTTP JSON con reintentos ante limite de tasa (429)."""
     datos_binarios = json.dumps(cuerpo).encode("utf-8") if cuerpo is not None else None
     cabeceras = {
         "Content-Type": "application/json",
@@ -75,7 +76,7 @@ def realizar_peticion_http(
             if error.code == 429 and intento < max_reintentos:
                 segundos_espera = 3 * (intento + 1)
                 print(
-                    f"      Postiz limite de tasa alcanzado (429). Esperando {segundos_espera}s para reintentar..."
+                    f"      Limite 429 alcanzado. Esperando {segundos_espera}s para reintentar..."
                 )
                 time.sleep(segundos_espera)
                 continue
@@ -127,12 +128,10 @@ def normalizar_nombre_archivo_video(nombre_video):
     return nombre_limpio
 
 
-def obtener_enlace_directo_dropbox(nombre_archivo, token_dropbox):
+def obtener_enlace_directo_dropbox(ruta_relativa_dropbox, token_dropbox):
     """Genera o reutiliza un enlace publico directo de descarga desde Dropbox."""
-    archivo_normalizado = normalizar_nombre_archivo_video(nombre_archivo)
-    ruta_archivo = f"{RUTA_DROPBOX_BASE.rstrip('/')}/{archivo_normalizado.lstrip('/')}"
     cuerpo_creacion = {
-        "path": ruta_archivo,
+        "path": ruta_relativa_dropbox,
         "settings": {"requested_visibility": "public"},
     }
 
@@ -145,7 +144,7 @@ def obtener_enlace_directo_dropbox(nombre_archivo, token_dropbox):
 
     enlace = respuesta.get("url")
     if not enlace:
-        cuerpo_lista = {"path": ruta_archivo, "direct_only": True}
+        cuerpo_lista = {"path": ruta_relativa_dropbox, "direct_only": True}
         respuesta_existente = realizar_peticion_http(
             "https://api.dropboxapi.com/2/sharing/list_shared_links",
             cuerpo=cuerpo_lista,
@@ -154,6 +153,68 @@ def obtener_enlace_directo_dropbox(nombre_archivo, token_dropbox):
         enlace = respuesta_existente["links"][0]["url"]
 
     return enlace.replace("dl=0", "raw=1")
+
+
+def deducir_dj_desde_carpeta(nombre_carpeta):
+    """Deduce el nombre formal del DJ segun el nombre de la carpeta contenedora."""
+    carpeta_min = nombre_carpeta.lower()
+
+    if "jordan-medina" in carpeta_min:
+        return "DJ Jordan Medina"
+    if "nikel" in carpeta_min:
+        return "DJ Nikel The Skpt"
+    if "deyzer" in carpeta_min:
+        return "DJ Deyzer"
+    if "top20" in carpeta_min or "top-20" in carpeta_min:
+        return "ProEditsClub"
+
+    partes = [p.capitalize() for p in nombre_carpeta.replace("-", " ").split()]
+    return " ".join(partes[:3])
+
+
+def obtener_nombre_dj(fila_datos, nombre_carpeta):
+    """Obtiene y normaliza el nombre del DJ a partir del CSV o de la carpeta."""
+    dj_directo = (
+        fila_datos.get("dj")
+        or fila_datos.get("proveedor")
+        or fila_datos.get("artista")
+        or ""
+    ).strip()
+
+    if dj_directo:
+        if dj_directo.islower():
+            dj_directo = dj_directo.title()
+        if not dj_directo.lower().startswith("dj ") and not dj_directo.lower().startswith("proedits"):
+            return f"DJ {dj_directo}"
+        return dj_directo
+
+    return deducir_dj_desde_carpeta(nombre_carpeta)
+
+
+def deducir_genero_musical(fila_datos, nombre_carpeta):
+    """Obtiene el genero musical a partir del CSV o del contexto de la carpeta."""
+    genero_directo = (
+        fila_datos.get("genero")
+        or fila_datos.get("genre")
+        or fila_datos.get("categoria")
+        or fila_datos.get("subgenero")
+        or ""
+    ).strip()
+
+    if genero_directo:
+        return genero_directo.title()
+
+    carpeta_min = nombre_carpeta.lower()
+    if "reggaeton" in carpeta_min:
+        return "Reggaeton"
+    if "halloween" in carpeta_min:
+        return "Halloween Special"
+    if "cumbia" in carpeta_min:
+        return "Cumbia"
+    if "salsa" in carpeta_min:
+        return "Salsa"
+
+    return "Open Format"
 
 
 def extraer_metadatos_producto(producto_cadena):
@@ -168,41 +229,20 @@ def extraer_metadatos_producto(producto_cadena):
     return " ".join(tema.split()), edit.strip(), bpm
 
 
-def obtener_nombre_proveedor(fila_datos):
-    """Obtiene y normaliza el nombre del proveedor o DJ para el contenido."""
-    proveedor_crudo = (
-        fila_datos.get("proveedor")
-        or fila_datos.get("dj")
-        or fila_datos.get("artista")
-        or "Deyzer"
-    ).strip()
-
-    if not proveedor_crudo:
-        return "Deyzer"
-
-    return proveedor_crudo.title() if proveedor_crudo.islower() else proveedor_crudo
-
-
-def obtener_nombre_artistico(proveedor):
-    """Retorna el nombre con prefijo DJ si aun no lo contiene."""
-    if proveedor.lower().startswith("dj "):
-        return proveedor
-    return f"DJ {proveedor}"
-
-
-def generar_contenido_texto(fila_datos):
-    """Genera el cuerpo HTML enriquecido para la descripcion de la publicacion."""
-    producto = fila_datos.get("producto", "")
+def generar_contenido_texto(fila_datos, nombre_carpeta):
+    """Genera la descripcion estructurada y personalizada segun DJ y Genero."""
+    producto = fila_datos.get("producto", fila_datos.get("titulo", ""))
     enlace_web = fila_datos.get("link", fila_datos.get("url", ""))
     tema, edit, bpm = extraer_metadatos_producto(producto)
-    proveedor = obtener_nombre_proveedor(fila_datos)
-    nombre_dj = obtener_nombre_artistico(proveedor)
 
-    partes_detalle = [texto for texto in (edit, f"{bpm} BPM" if bpm else "") if texto]
-    linea_detalle = " · ".join(partes_detalle)
+    nombre_dj = obtener_nombre_dj(fila_datos, nombre_carpeta)
+    genero = deducir_genero_musical(fila_datos, nombre_carpeta)
 
-    etiqueta_proveedor = re.sub(r"[^a-zA-Z0-9]", "", proveedor)
+    elementos_detalle = [x for x in (edit, f"{bpm} BPM" if bpm else "", genero) if x]
+    linea_detalle = " · ".join(elementos_detalle)
+
     etiqueta_dj = re.sub(r"[^a-zA-Z0-9]", "", nombre_dj)
+    etiqueta_genero = re.sub(r"[^a-zA-Z0-9]", "", genero)
 
     parrafos = [
         f"🔥 NUEVO UPDATE de {nombre_dj.upper()} 🔥",
@@ -211,37 +251,37 @@ def generar_contenido_texto(fila_datos):
     ]
 
     if linea_detalle:
-        parrafos.append(linea_detalle)
+        parrafos.append(f"📦 {linea_detalle}")
 
     parrafos.extend([
         "",
-        f"Ya está disponible el nuevo update de {nombre_dj} en ProEditsClub. "
-        "Edits listos para la cabina, con intros limpias y BPM exacto para tus mezclas.",
+        f"Ya está disponible este tremendo material de {nombre_dj} ({genero}) en ProEditsClub. "
+        "Edits exclusivos listos para la cabina, con intros limpias y BPM exacto para tus mezclas.",
         "",
-        "👉 Escúchalo y descárgalo aquí:",
+        "👉 Escúchalo y descárgalo ahora en:",
         enlace_web,
         "",
-        f"#ProEditsClub #{etiqueta_proveedor} #{etiqueta_dj} #DJ #Remix #Edits2026 #DJLife",
+        f"#ProEditsClub #{etiqueta_dj} #{etiqueta_genero} #DJ #Remix #Edits2026 #DJLife",
     ])
 
     return "".join(f"<p>{linea}</p>" for linea in parrafos)
 
 
-def generar_titulo_publicacion(fila_datos):
-    """Genera el titulo corto para publicaciones de video en Facebook."""
-    producto = fila_datos.get("producto", "")
+def generar_titulo_publicacion(fila_datos, nombre_carpeta):
+    """Genera el titulo conciso para publicaciones en redes sociales."""
+    producto = fila_datos.get("producto", fila_datos.get("titulo", ""))
     tema, _, bpm = extraer_metadatos_producto(producto)
-    nombre_dj = obtener_nombre_artistico(obtener_nombre_proveedor(fila_datos))
+    nombre_dj = obtener_nombre_dj(fila_datos, nombre_carpeta)
     sufijo_bpm = f" ({bpm} BPM)" if bpm else ""
     return f"Nuevo update {nombre_dj} - {tema}{sufijo_bpm}"[:250]
 
 
-def construir_configuracion_red(red, tipo_publicacion, fila_datos):
-    """Construye el diccionario de opciones especificas segun la red y el tipo de contenido."""
+def construir_configuracion_red(red, tipo_publicacion, fila_datos, nombre_carpeta):
+    """Construye las opciones especificas segun la red social de destino."""
     configuracion = {"__type": red, "post_type": tipo_publicacion}
 
     if red == "facebook" and tipo_publicacion == "post":
-        configuracion["title"] = generar_titulo_publicacion(fila_datos)
+        configuracion["title"] = generar_titulo_publicacion(fila_datos, nombre_carpeta)
 
     if red == "instagram":
         configuracion["collaborators"] = []
@@ -261,7 +301,7 @@ def construir_configuracion_red(red, tipo_publicacion, fila_datos):
 
 
 def cargar_historial_publicados(ruta_archivo):
-    """Carga los identificadores de publicaciones previas para evitar duplicidad."""
+    """Carga los identificadores de publicaciones previas para evitar duplicados."""
     if not ruta_archivo.exists():
         return set()
 
@@ -277,37 +317,88 @@ def guardar_historial_publicados(ruta_archivo, historial_set):
     )
 
 
-def cargar_registros_csv(ruta_directorio):
-    """Lee el archivo CSV de productos y videos desde la ruta configurada."""
-    archivo_csv = ruta_directorio / "ids-y-links.csv"
-    if not archivo_csv.exists():
-        raise SystemExit(f"No se encontro el archivo CSV requerido en: {archivo_csv}")
+def buscar_archivo_csv(ruta_carpeta):
+    """Localiza el archivo CSV dentro de la carpeta indicada."""
+    archivo_estandar = ruta_carpeta / "ids-y-links.csv"
+    if archivo_estandar.exists():
+        return archivo_estandar
 
-    with open(archivo_csv, encoding="utf-8-sig", newline="") as flujo:
-        return list(csv.DictReader(flujo))
+    candidatos_csv = list(ruta_carpeta.glob("*.csv"))
+    if candidatos_csv:
+        return candidatos_csv[0]
+
+    return None
 
 
-def filtrar_tareas_pendientes(registros, redes_disponibles, historial):
-    """Determina que videos y formatos faltan por publicar en los canales configurados."""
+def recolectar_tareas_de_todas_las_carpetas(rutas_carpetas):
+    """Lee todas las carpetas configuradas y consolida la lista global de tareas."""
+    lista_global = []
+
+    for ruta_texto in rutas_carpetas:
+        carpeta_obj = Path(ruta_texto)
+        if not carpeta_obj.exists():
+            print(f"AVISO: No se encontro la carpeta local: {carpeta_obj.name}")
+            continue
+
+        archivo_csv = buscar_archivo_csv(carpeta_obj)
+        if not archivo_csv:
+            print(f"AVISO: No hay archivo CSV en: {carpeta_obj.name}")
+            continue
+
+        nombre_carpeta = carpeta_obj.name
+        with open(archivo_csv, encoding="utf-8-sig", newline="") as flujo:
+            filas = list(csv.DictReader(flujo))
+
+        for fila in filas:
+            nombre_video = fila.get("video", fila.get("archivo", ""))
+            if not nombre_video:
+                continue
+
+            nombre_video_norm = normalizar_nombre_archivo_video(nombre_video)
+            ruta_dropbox = f"/VIDEOS-PUBLICIDAD-PROEDITS/{nombre_carpeta}/{nombre_video_norm}"
+
+            lista_global.append({
+                "fila": fila,
+                "nombre_carpeta": nombre_carpeta,
+                "nombre_video": nombre_video_norm,
+                "ruta_dropbox": ruta_dropbox,
+            })
+
+    return lista_global
+
+
+def filtrar_tareas_pendientes(tareas_totales, redes_disponibles, historial):
+    """Filtra y agrupa unicamente los destinos que faltan por publicar."""
     pendientes = []
 
-    for fila in registros:
-        nombre_video = fila.get("video", "")
-        faltantes = [
-            destino
-            for destino in DESTINOS_PUBLICACION
-            if destino[1] in redes_disponibles
-            and f"{nombre_video}|{destino[0]}" not in historial
-        ]
+    for tarea in tareas_totales:
+        nombre_video = tarea["nombre_video"]
+        carpeta = tarea["nombre_carpeta"]
+
+        faltantes = []
+        for destino in DESTINOS_PUBLICACION:
+            clave_destino = destino[0]
+            red = destino[1]
+
+            if red not in redes_disponibles:
+                continue
+
+            clave_con_carpeta = f"{carpeta}/{nombre_video}|{clave_destino}"
+            clave_simple = f"{nombre_video}|{clave_destino}"
+
+            if clave_con_carpeta in historial or clave_simple in historial:
+                continue
+
+            faltantes.append(destino)
 
         if faltantes:
-            pendientes.append((fila, faltantes))
+            pendientes.append((tarea, faltantes))
 
     return pendientes
 
 
 def calcular_fecha_publicacion(tiempo_base, indice_video):
-    """Calcula la marca de tiempo de publicacion espaciada cada 30 minutos."""
+    """Calcula la fecha de publicacion espaciada exactamente cada 30 minutos."""
     delta = timedelta(minutes=INTERVALO_MINUTOS * indice_video)
     fecha_calculada = tiempo_base + delta
     tipo_envio = "now" if indice_video == 0 else "schedule"
@@ -320,6 +411,7 @@ def enviar_publicacion_postiz(
     red,
     tipo_publicacion,
     fila,
+    nombre_carpeta,
     clave_destino,
     url_video,
     tipo_envio,
@@ -327,15 +419,15 @@ def enviar_publicacion_postiz(
 ):
     """Construye y envia la peticion de creacion/programacion hacia Postiz."""
     tiene_texto = tipo_publicacion == "post"
-    nombre_dj = obtener_nombre_artistico(obtener_nombre_proveedor(fila))
+    nombre_dj = obtener_nombre_dj(fila, nombre_carpeta)
     contenido = (
-        generar_contenido_texto(fila)
+        generar_contenido_texto(fila, nombre_carpeta)
         if tiene_texto
         else f"<p>🔥 Nuevo update {nombre_dj} · ProEditsClub</p>"
     )
 
     numero_identificador = fila.get("numero") or fila.get("id") or "1"
-    ajustes_red = construir_configuracion_red(red, tipo_publicacion, fila)
+    ajustes_red = construir_configuracion_red(red, tipo_publicacion, fila, nombre_carpeta)
 
     payload = {
         "type": tipo_envio,
@@ -368,20 +460,26 @@ def procesar_cola_publicaciones(pendientes, redes_activas, clave_postiz, token_d
     """Itera y programa cada video pendiente respetando el intervalo de 30 minutos."""
     tiempo_inicio = datetime.now(timezone.utc)
 
-    for indice, (fila, destinos_faltantes) in enumerate(pendientes):
-        nombre_video = fila.get("video", "")
+    for indice, (tarea, destinos_faltantes) in enumerate(pendientes):
+        fila = tarea["fila"]
+        nombre_video = tarea["nombre_video"]
+        carpeta = tarea["nombre_carpeta"]
+        ruta_dropbox = tarea["ruta_dropbox"]
+
         fecha_programada, tipo_envio = calcular_fecha_publicacion(tiempo_inicio, indice)
         destinos_nombres = ", ".join(d[0] for d in destinos_faltantes)
+        nombre_dj = obtener_nombre_dj(fila, carpeta)
+        genero = deducir_genero_musical(fila, carpeta)
 
         print(
-            f"{indice + 1:>2}. {nombre_video} -> {tipo_envio} "
+            f"{indice + 1:>2}. [{carpeta}] {nombre_video} ({nombre_dj} · {genero}) -> {tipo_envio} "
             f"{fecha_programada.astimezone():%d/%m %H:%M} [{destinos_nombres}]"
         )
 
         if MODO_SIMULACION:
             continue
 
-        url_video_dropbox = obtener_enlace_directo_dropbox(nombre_video, token_dropbox)
+        url_video_dropbox = obtener_enlace_directo_dropbox(ruta_dropbox, token_dropbox)
 
         for clave_destino, red, post_type, _ in destinos_faltantes:
             canal_id, _ = redes_activas[red]
@@ -392,12 +490,14 @@ def procesar_cola_publicaciones(pendientes, redes_activas, clave_postiz, token_d
                     red=red,
                     tipo_publicacion=post_type,
                     fila=fila,
+                    nombre_carpeta=carpeta,
                     clave_destino=clave_destino,
                     url_video=url_video_dropbox,
                     tipo_envio=tipo_envio,
                     fecha_envio=fecha_programada,
                 )
-                historial.add(f"{nombre_video}|{clave_destino}")
+                clave_registro = f"{carpeta}/{nombre_video}|{clave_destino}"
+                historial.add(clave_registro)
                 guardar_historial_publicados(ARCHIVO_HISTORIAL, historial)
                 print(f"      ok {clave_destino}")
                 time.sleep(1.5)
@@ -406,7 +506,7 @@ def procesar_cola_publicaciones(pendientes, redes_activas, clave_postiz, token_d
 
 
 def main():
-    """Punto de entrada principal del flujo de publicacion."""
+    """Punto de entrada principal para el procesamiento multicarpetas."""
     historial = cargar_historial_publicados(ARCHIVO_HISTORIAL)
 
     clave_postiz = os.environ.get("POSTIZ_API_KEY", TOKEN_POSTIZ_POR_DEFECTO)
@@ -416,20 +516,25 @@ def main():
         raise SystemExit("Faltan POSTIZ_API_KEY y/o DROPBOX_TOKEN.")
 
     redes_activas = obtener_canales_activos(clave_postiz)
-    print("Canales configurados:", ", ".join(f"{k} -> {v[0]}" for k, v in redes_activas.items()))
+    print("Canales conectados:", ", ".join(f"{k} -> {v[0]}" for k, v in redes_activas.items()))
 
     if "instagram" not in redes_activas:
-        print("AVISO: No hay canal de Instagram conectado en Postiz; omitiendo publicaciones en Instagram.")
-
+        print("AVISO: No hay canal de Instagram conectado; se omitira Instagram.")
     if "tiktok" not in redes_activas:
-        print("AVISO: No hay canal de TikTok conectado en Postiz; omitiendo publicaciones en TikTok.")
+        print("AVISO: No hay canal de TikTok conectado; se omitira TikTok.")
+    if "facebook" not in redes_activas:
+        print("AVISO: No hay canal de Facebook conectado; se omitira Facebook.")
 
-    filas = cargar_registros_csv(CARPETA_VIDEOS)
-    pendientes = filtrar_tareas_pendientes(filas, redes_activas, historial)
+    tareas_totales = recolectar_tareas_de_todas_las_carpetas(CARPETAS_DROPBOX_PREDETERMINADAS)
+    print(f"Total de videos detectados en todas las carpetas: {len(tareas_totales)}")
+
+    pendientes = filtrar_tareas_pendientes(tareas_totales, redes_activas, historial)
 
     if not pendientes:
         print("No hay tareas pendientes por publicar.")
         return
+
+    print(f"Videos con publicaciones pendientes: {len(pendientes)}")
 
     procesar_cola_publicaciones(
         pendientes=pendientes,
@@ -442,7 +547,7 @@ def main():
     if MODO_SIMULACION:
         print("(Simulacion completada: no se envio ninguna peticion)")
     else:
-        print("Proceso de publicacion y programacion finalizado con exito.")
+        print("Proceso de publicacion y programacion multicarpetas finalizado.")
 
 
 if __name__ == "__main__":
