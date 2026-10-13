@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -46,27 +47,41 @@ TOKEN_POSTIZ_POR_DEFECTO = (
     "cf8920774d1eab8b801a6b1126bbc8cb711975170065f1afdb7566c20fbbb8c2"
 )
 TOKEN_DROPBOX_POR_DEFECTO = (
-    "sl.u.AGyMDgW958vf2s9VHW4t0T_qhp-1jGYdaM9yp8-01Jd6mbY1DJ47cHbnZDNpWgQaaTHSTmnBB1ZITpWBomMRkWVV6tptHmGebAzvssFOrj2syqIvUNaiabalLFy5l9pKkhTGv1jDLb-FEk5PVYCPg-BWdrmAI1_OTg-j642iqKsQj8dgeYzhyrVZsSNQBuLNioCHBR15QFJAht7ekJyhFCOcxiXnuzHqnAaCFsT7WIAH5LoPK3zinAsjQjJmtUE8PR_uXsBket6eOw7klINHd9X6rLt9bIjBV1vypyMvegG4XgMaBn8DbyZreVUV800aIcC32Ysot4CMkViqW-VlKUIzopqnMyW5mCOrUrraOKdvOCDeq_CFow4hlLlJm9b78n6768QBpmI_43am51kUM9nTxRr3LPgGRM41-qLSLWZVSW0xnzOPt4kn2hs6MKCgKmifbpGTXZD12Li3NQiMnRpIjfC-Yc00uZTs7_7SHdwS_tzL_cRsqTM0p2M9In50NYUOv7WMPksvudS5OfCgMX5uS51ukepCsfzj1qn8ZBYixuLlC7BVUAz8ltgjbXGXpvuC8QfKo-ntgZEDKeIJj7_tJSvdwbhvgjr_4YmoJiMgqw1_GJl65QwdOm5x5DXLK95zGo7VPiO66w1j657YBijMwhWRL_2nlWWkyKDjn3F5w8xoEevHmf0U6HaBA8BiNQBriC_EhxpJYeByMqjJjIqMtuV9gZ9IQ4vk4BpfJsGkeCkd4uXQN89HBU4ci0w86r99EH2cm5nLOL4ngF76vub7Ug6zz6kB--3rADHChxShM9sqLBt8uCAgVOaiAnbHtKs9CJOdloFHngtiUvpUxUR6tWTP4YlF02X179lzB1V-FX4bcqJKhNw_X3Pdyr37RtVDwA8KskUIFwDQf3kIBCNVB39f_lnYvqJj3gecozV31ON-qhr4FmMMMy79bflqnKy55Ztgm2bDTFUyfyQZYiRoIDTG_iZ5mzUrg_xhvhrTrupDQJoJSYBnBryNQYJIDNpT8ltvUPwXHQee86UddSlCunQjWnbV4k6racWU-OIdnQa8BfpdnbqFt-e7GQfcwi8CsXYkMQnntT0atwAvHl2iAVYU4EN5vUzsJexEIeeR1kG1AObRJABhglZ7inP2OpXzIygKcO7ESPDgSjIYJfiC08AusWEADJ9056_oxEsia5fRmmHRoGcXEBYFTEWuUhogurAz5zzet174h0_qDBTY6FcRsSQNj8C9zYaXlWuDafnYcY95D9kiDgTvGMbxlyZlB7kSgY6BX_4DUFyHRQPBSJCRUv8nQiOTnP9XgqyJnyPkYVrJJmDagRgww84Ns0k"
+    "sl.u.AGwjaH7NuoHEHLW4VXWArX99y2R94Tl_KfUreDbQUB7ntLROpQdZiRQHAk0vW3XSAbhgQBvanTCY-VFVFS_hx6Jk_begNuN2hHLFRsZLjbC5IF_D4opQc7h_6fAZ_E0qf2GAceu-QQgId5NFWWon-dOqoRUoKrI5OZsnS_XoaQAVLXxhD35yLac6I2-q0tY5blu3ozxHlwO-tlUX_wpPIqhU6Eyg9lMkpE2xFufjyNigkEw7g19vWe7PDsQ392cdQj6WDuW2Wuz5k3vA-x1IMecUFXaguLTuPp5mGqIczwccy9Tc525TyhoZCw45xXSvxMHHj2RLnB8oQ4S3TDpfMbcg2O7pQ_l7ph-xsMeJZX0l0tQEczkYHRRPm6UFm8W9Bg73nqZkmu34JDf1ouWyMFDgZoNKisXvBhX0b_VmawPff6RkUFqv-WTDecump7ZNpGc3B5SIO1QudK4SCVG3G-uEEbnBYv4OkBomvfbFg1cOA1pmb60oc65Qzcms4s7r-c2mSVxfL5uJE933Jh8AfQFcwaQFe1m1Om80B9DTx-wZxACls_Q52mH9kaybT-whTvuKRiGw96tMu396dbOlHCmoMON5sEVxQcLJMEJfDB-vQp8_3yOdkrS4r65SOco6BFS8c2Gdkpgje-1A8cs-K4YF4UKSUFk-Gmjm7PZCas1tdEXR8ciFsbXrex3hL3gttCZxmRGtbSmkJpPGXbtFG2MiMNCxOc0AX2GysISgoBC_SwaAuMINpKkt9DiKSIHUZ9wCBACh89ag-M-l0_iGHylhibmk84knZJxr1J53yS6ugkeu2FFKz13Rmb582vPvkRRYWUrrvDLN0E-Lx0b05DgiLV2X9onb3nR5RxW4fIyKNpzLfa_ksVFiKuA8L4x9w9uISC53GEScugCU2TJAK-LPumvxMH4t1M8GA49lVK5Za9NCZrclW5a7jsVIK1LLy5CJSJlFZGRuOFQ2aCFcYHMHqUtfDmKt3ZyyeXUdbD-LAevfccqeo38KE3DzZr0OYWU5pK0E9RO3NLmSmg7lc4B9qSVesxlhh49Qx-dMI6rvzf8ldLujjTwk2uYCtikMAAAltsk60COdVF_AdUEwYkiqpZC_2He2w0oeeHG1u0nL4oB4_vGl8H0NenD07v_v5iaVWkBenFDXAI0YVJtN9vD1d26lUch8gyMdSn8XUycnvrDsCD25E3I4VEI4soew8CJwHqdDuv5jf7jOuw9XyfKHTbnDlhLayxsEC6Qtg8v3-E0XKN0O6U00_3OdNTFEBsGQpo5NY6qBSeqq4lznDJhwkEZarAQFHuHjiSqd6R5HMc1U19T_NbEj1HkaY-JjyRw"
 )
 
 
-def realizar_peticion_http(url, cuerpo, token_autorizacion, permitir_409=False, metodo="POST"):
-    """Ejecuta una solicitud HTTP JSON y retorna la respuesta decodificada."""
+def realizar_peticion_http(
+    url, cuerpo, token_autorizacion, permitir_409=False, metodo="POST", max_reintentos=5
+):
+    """Ejecuta una solicitud HTTP JSON con reintentos automaticos ante limite de tasa (429)."""
     datos_binarios = json.dumps(cuerpo).encode("utf-8") if cuerpo is not None else None
     cabeceras = {
         "Content-Type": "application/json",
         "Authorization": token_autorizacion,
     }
-    solicitud = urllib.request.Request(url, data=datos_binarios, headers=cabeceras, method=metodo)
 
-    try:
-        with urllib.request.urlopen(solicitud, timeout=60) as respuesta:
-            return json.load(respuesta)
-    except urllib.error.HTTPError as error:
-        if permitir_409 and error.code == 409:
-            return json.loads(error.read().decode("utf-8"))
-        mensaje_error = error.read().decode("utf-8", errors="replace")[:400]
-        raise SystemExit(f"Error {error.code} en {url}: {mensaje_error}")
+    for intento in range(max_reintentos + 1):
+        solicitud = urllib.request.Request(
+            url, data=datos_binarios, headers=cabeceras, method=metodo
+        )
+        try:
+            with urllib.request.urlopen(solicitud, timeout=60) as respuesta:
+                return json.load(respuesta)
+        except urllib.error.HTTPError as error:
+            if permitir_409 and error.code == 409:
+                return json.loads(error.read().decode("utf-8"))
+
+            if error.code == 429 and intento < max_reintentos:
+                segundos_espera = 3 * (intento + 1)
+                print(
+                    f"      Postiz limite de tasa alcanzado (429). Esperando {segundos_espera}s para reintentar..."
+                )
+                time.sleep(segundos_espera)
+                continue
+
+            mensaje_error = error.read().decode("utf-8", errors="replace")[:400]
+            raise SystemExit(f"Error {error.code} en {url}: {mensaje_error}")
 
 
 def obtener_canales_activos(llave_postiz):
@@ -384,6 +399,7 @@ def procesar_cola_publicaciones(pendientes, redes_activas, clave_postiz, token_d
             historial.add(f"{nombre_video}|{clave_destino}")
             guardar_historial_publicados(ARCHIVO_HISTORIAL, historial)
             print(f"      ok {clave_destino}")
+            time.sleep(1.5)
 
 
 def main():
