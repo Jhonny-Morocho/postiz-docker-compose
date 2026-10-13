@@ -81,7 +81,7 @@ def realizar_peticion_http(
                 continue
 
             mensaje_error = error.read().decode("utf-8", errors="replace")[:400]
-            raise SystemExit(f"Error {error.code} en {url}: {mensaje_error}")
+            raise RuntimeError(f"Error {error.code} en {url}: {mensaje_error}")
 
 
 def obtener_canales_activos(llave_postiz):
@@ -252,6 +252,7 @@ def construir_configuracion_red(red, tipo_publicacion, fila_datos):
         configuracion["duet"] = False
         configuracion["stitch"] = False
         configuracion["comment"] = True
+        configuracion["autoAddMusic"] = "no"
         configuracion["brand_content_toggle"] = False
         configuracion["brand_organic_toggle"] = False
         configuracion["video_made_with_ai"] = False
@@ -384,22 +385,24 @@ def procesar_cola_publicaciones(pendientes, redes_activas, clave_postiz, token_d
 
         for clave_destino, red, post_type, _ in destinos_faltantes:
             canal_id, _ = redes_activas[red]
-            enviar_publicacion_postiz(
-                clave_postiz=clave_postiz,
-                canal_id=canal_id,
-                red=red,
-                tipo_publicacion=post_type,
-                fila=fila,
-                clave_destino=clave_destino,
-                url_video=url_video_dropbox,
-                tipo_envio=tipo_envio,
-                fecha_envio=fecha_programada,
-            )
-
-            historial.add(f"{nombre_video}|{clave_destino}")
-            guardar_historial_publicados(ARCHIVO_HISTORIAL, historial)
-            print(f"      ok {clave_destino}")
-            time.sleep(1.5)
+            try:
+                enviar_publicacion_postiz(
+                    clave_postiz=clave_postiz,
+                    canal_id=canal_id,
+                    red=red,
+                    tipo_publicacion=post_type,
+                    fila=fila,
+                    clave_destino=clave_destino,
+                    url_video=url_video_dropbox,
+                    tipo_envio=tipo_envio,
+                    fecha_envio=fecha_programada,
+                )
+                historial.add(f"{nombre_video}|{clave_destino}")
+                guardar_historial_publicados(ARCHIVO_HISTORIAL, historial)
+                print(f"      ok {clave_destino}")
+                time.sleep(1.5)
+            except Exception as error_envio:
+                print(f"      FALLO {clave_destino}: {error_envio}")
 
 
 def main():
