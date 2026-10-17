@@ -59,7 +59,12 @@ Fork de `gitroomhq/postiz-docker-compose` con dos añadidos: **deploy a producci
 
 1. Dominio: registro DNS A → IP del servidor.
 2. *Create Service → Compose*, provider **GitHub**, repo `postiz-docker-compose`, rama `main`, **Compose Path `./docker-compose.prod.yaml`**.
-3. *Environment*: pegar `.env.example` con valores reales (`JWT_SECRET`, `POSTGRES_PASSWORD`, `TEMPORAL_DB_PASSWORD` con `openssl rand`; `MAIN_URL=https://tu.dominio`).
+3. *Environment*: pegar `.env.example` con valores reales, en formato `CLAVE=valor` sin comentarios ni comillas, y pulsar **Save**.
+   - `MAIN_URL`: tu dominio con `https://`.
+   - `POSTGRES_PASSWORD` / `TEMPORAL_DB_PASSWORD`: contraseñas de las bases; en local eran `postiz-password` y `temporal`.
+   - `JWT_SECRET`: clave que firma las sesiones; no viene de ningún sitio, se inventa. Mínimo 32 caracteres, sin espacios, `$` ni `#`. Cambiarla cierra las sesiones pero no pierde datos. Generarla con:
+     - PowerShell: `-join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })`
+     - Git Bash / Linux: `openssl rand -hex 32`
 4. *Domains*: host = tu dominio, servicio `postiz`, puerto `5000`, HTTPS + Let's Encrypt.
 5. *Deploy*. Crear la cuenta y luego poner `DISABLE_REGISTRATION=true` y redeploy.
 6. Actualizar las redirect URIs OAuth en Meta y TikTok al nuevo dominio.
